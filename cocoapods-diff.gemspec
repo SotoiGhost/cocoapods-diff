@@ -1,15 +1,15 @@
 # coding: utf-8
 lib = File.expand_path('../lib', __FILE__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
-require 'cocoapods-diff/gem_version.rb'
+require 'cocoapods-diff/version.rb'
 
 Gem::Specification.new do |spec|
   spec.name          = 'cocoapods-diff'
   spec.version       = CocoapodsDiff::VERSION
   spec.authors       = ['Israel Soto']
   spec.email         = ['israel.spgh@gmail.com']
-  spec.description   = %q{A short description of cocoapods-diff.}
-  spec.summary       = %q{A longer description of cocoapods-diff.}
+  spec.description   = %q{A longer description of cocoapods-diff.}
+  spec.summary       = %q{A short description of cocoapods-diff.}
   spec.homepage      = 'https://github.com/EXAMPLE/cocoapods-diff'
   spec.license       = 'MIT'
 

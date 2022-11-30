@@ -1,1 +1,1 @@
-require 'cocoapods-diff/gem_version'
+require 'cocoapods-diff/version'
