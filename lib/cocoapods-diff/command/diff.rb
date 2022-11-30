@@ -35,7 +35,8 @@ module Pod
 
       def self.options
         [
-          ["--#{CocoapodsDiff::REGEX_FLAG_NAME}", "Interpret the `POD_NAME` as a regular expression"]
+          ["--#{CocoapodsDiff::REGEX_FLAG_NAME}", "Interpret the `POD_NAME` as a regular expression"],
+          ["--#{CocoapodsDiff::MARKDOWN_OPTION_NAME}", "Output a markdown file with diffs. Example: --#{CocoapodsDiff::MARKDOWN_OPTION_NAME}=path/to/save/markdown_name.md"],
         ].concat(super)
       end
 
@@ -44,6 +45,8 @@ module Pod
         @older_version = argv.shift_argument
         @newer_version = argv.shift_argument
         @use_regex = argv.flag?(CocoapodsDiff::REGEX_FLAG_NAME)
+        @markdown_path = argv.option(CocoapodsDiff::MARKDOWN_OPTION_NAME)
+        @print_diff = @markdown_path.nil?
         super
       end
 
@@ -83,9 +86,13 @@ module Pod
         @older_spec.default_subspecs = []
         @newer_spec.default_subspecs = []
 
-        UI.title "Calculating diff" do
-          UI.puts generate_diff_table
+        if @print_diff
+          return UI.title "Calculating diff" do
+            UI.puts generate_diff_table
+          end
         end
+
+        generate_markdown if @markdown_path
       end
 
       def get_specification_for_version(version)
@@ -103,13 +110,49 @@ module Pod
 
         diff = "# #{@pod_name}\n"
         diff += "| #{@older_version.ljust(max_length)} | #{@newer_version.ljust(max_length)} |\n"
-        diff += "|:#{"=".ljust(max_length, "=")}:|:#{"=".ljust(max_length, "=")}:|\n"
+        diff += "|-#{"-".ljust(max_length, "-")}:|:#{"-".ljust(max_length, "-")}-|\n"
         all_names.map! do |name|
           left_name = older_subspecs_names.include?(name) ? name : ""
           right_name = newer_subspecs_names.include?(name) ? name : ""
           "| #{left_name.ljust(max_length)} | #{right_name.ljust(max_length)} |\n"
         end
         diff + all_names.join()
+      end
+
+      def generate_markdown
+        require 'pathname'
+        markdown_pathname = Pathname.new(@markdown_path)
+        markdown_pathname.dirname.mkpath
+        markdown_pathname.write(generate_diff_table)
+      end
+
+      def build_podfile(spec, platforms)
+        Podfile.new do
+          install! "cocoapods", integrate_targets: false
+          use_frameworks!
+          platform platform_name, platform_version
+          pod podspec.name, podspec: podspec.defined_in_file
+          target "Dependencies"
+        end
+
+        @podfile ||= begin
+          if podspec = @podspec
+            platform = podspec.available_platforms.first
+            platform_name = platform.name
+            platform_version = platform.deployment_target.to_s
+            source_urls = Config.instance.sources_manager.all.map(&:url).compact
+            Podfile.new do
+              install! 'cocoapods', integrate_targets: false, warn_for_multiple_pod_sources: false
+              source_urls.each { |u| source(u) }
+              platform platform_name, platform_version
+              pod podspec.name, podspec: podspec.defined_in_file
+              target 'Dependencies'
+            end
+          else
+            verify_podfile_exists!
+            config.podfile
+          end
+        end
       end
     end
   end

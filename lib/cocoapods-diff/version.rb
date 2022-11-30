@@ -1,6 +1,6 @@
 module CocoapodsDiff
   NAME = "cocoapods-diff"
-  VERSION = "0.1.0"
+  VERSION = "0.2.0"
 
   # CLAide Arguments
   POD_NAME_ARGUMENT_NAME = "POD_NAME"
@@ -9,4 +9,7 @@ module CocoapodsDiff
 
   # CLAide Flags
   REGEX_FLAG_NAME = "regex"
+
+  # CLAide Options
+  MARKDOWN_OPTION_NAME = "markdown"
 end

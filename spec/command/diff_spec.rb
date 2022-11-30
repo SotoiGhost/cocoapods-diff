@@ -49,11 +49,22 @@ module Pod
       end
 
       describe "Test the command" do
-        it "shows the diff" do
+        it "returns the diff as string" do
           diff = Command.parse(%w{ diff Firebase 6.0.0 10.0.0 })
           diff.validate!
           result = diff.run
+          result.should.be.instance_of String
           result.should.not.be.empty?
+        end
+
+        it "generates the diff as markdown" do
+          require 'pathname'
+          markdown_pathname = Pathname.new("spec/test/Firebase.md")
+          diff = Command.parse(%W{ diff Firebase 6.0.0 10.0.0 --markdown=#{markdown_pathname} })
+          diff.validate!
+          diff.run
+          markdown_pathname.exist?.should.be.true?
+          markdown_pathname.empty?.should.be.false?
         end
       end
     end
