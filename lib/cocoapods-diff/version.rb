@@ -1,6 +1,6 @@
 module CocoapodsDiff
   NAME = "cocoapods-diff"
-  VERSION = "0.3.0"
+  VERSION = "0.4.0"
 
   # CLAide Arguments
   POD_NAME_ARGUMENT_NAME = "POD_NAME"

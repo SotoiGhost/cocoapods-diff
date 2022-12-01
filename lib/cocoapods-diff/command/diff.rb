@@ -158,19 +158,34 @@ module Pod
         diff = "# #{@pod_name}\n"
 
         @platforms.each do |platform|
-          older_subspecs_names = @older_subspecs[platform.name].map(&:name)
-          newer_subspecs_names = @newer_subspecs[platform.name].map(&:name)
-          all_names = (newer_subspecs_names | older_subspecs_names)
-          max_length = all_names.max_by(&:length).length
-
-          diff += "\n## #{platform.name}\n\n"
-          diff += "| #{@older_version.ljust(max_length)} | #{@newer_version.ljust(max_length)} |\n"
-          diff += "|-#{"-".ljust(max_length, "-")}:|:#{"-".ljust(max_length, "-")}-|\n"
+          # Get a hash with the needed data: { name: => minimum supported version }
+          older_subspecs_data = @older_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) }
+          newer_subspecs_data = @newer_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) }
+          
+          all_names = (newer_subspecs_data.keys | older_subspecs_data.keys)
+          name_header = "Name"
+          version_header = "Minimum Supported Version"
+          
+          # Calculate the cell length to print a pretty table
+          name_cell_length = all_names.max_by(&:length).length
+          name_cell_length = [name_cell_length, name_header.length].max
+          version_cell_length = (newer_subspecs_data.values | older_subspecs_data.values).max_by(&:length).length
+          version_cell_length = [version_cell_length, version_header.length].max
+          
+          # Build the table
+          diff += "\n## #{platform.name} #{@older_version} vs. #{@newer_version}\n\n"
+          diff += "| #{name_header.ljust(name_cell_length)} | #{version_header.ljust(version_cell_length)} | #{name_header.ljust(name_cell_length)} | #{version_header.ljust(version_cell_length)} |\n"
+          diff += "|-#{"".ljust(name_cell_length, "-")}:|:#{"".ljust(version_cell_length, "-")}-|-#{"".ljust(name_cell_length, "-")}:|:#{"".ljust(version_cell_length, "-")}-|\n"
+          
           all_names.each do |name|
-            older_name = older_subspecs_names.include?(name) ? name : ""
-            newer_name = newer_subspecs_names.include?(name) ? name : ""
-            diff += "| #{older_name.ljust(max_length)} | #{newer_name.ljust(max_length)} |\n"
+            older_name = older_subspecs_data.keys.include?(name) ? name.to_s : ""
+            older_version = older_subspecs_data[name] || ""
+            newer_name = newer_subspecs_data.keys.include?(name) ? name.to_s : ""
+            newer_version = newer_subspecs_data[name] || ""
+
+            diff += "| #{older_name.ljust(name_cell_length)} | #{older_version.ljust(version_cell_length)} | #{newer_name.ljust(name_cell_length)} | #{newer_version.ljust(version_cell_length)} |\n"
           end
+
           diff += "\n"
         end
         diff
@@ -183,20 +198,18 @@ module Pod
         markdown_pathname.write(generate_diff_table)
       end
 
-      def build_podfile(spec)
-        p = spec.available_platforms.first
-        dependencies = spec
-
+      def build_podfile(subspecs)
         Podfile.new do
           install! "cocoapods", integrate_targets: false
           use_frameworks!
           
-          target "#{spec.name}_#{p.name}" do
-            platform p.name, p.deployment_target.to_s
-            spec.subspecs.each { |subspec| pod subspec.name, subspec.version }
+          @platforms.each do |p|
+            platform_subspecs = subspecs[platform.name]
+
+            target "#{spec.name}_#{p.name}" do
+              platform p.name, p.deployment_target.to_s
+              spec.subspecs.each { |subspec| pod subspec.name, subspec.version }
+            end
           end
         end
       end
-    end
-  end
-end
