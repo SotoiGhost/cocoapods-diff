@@ -49,6 +49,12 @@ module Pod
       end
 
       describe "Test the command" do
+        it "returns a warning if there's nothing to compare" do
+          diff = Command.parse(%W{ diff GooglePlaces 6.0.0 7.0.0 })
+          diff.validate!
+          diff.run.should.match(/There's nothing to compare/)
+        end
+
         it "returns the diff as string" do
           diff = Command.parse(%w{ diff Firebase 6.0.0 10.0.0 })
           diff.validate!
@@ -66,6 +72,15 @@ module Pod
           markdown_pathname.exist?.should.be.true?
           markdown_pathname.empty?.should.be.false?
         end
+
+        # it "generates the newer Podfile" do
+        #   # require 'pathname'
+        #   # markdown_pathname = Pathname.new("spec/test/Firebase.md")
+        #   diff = Command.parse(%W{ diff Firebase 6.0.0 10.0.0 })
+        #   diff.validate!
+        #   puts diff.run
+        #   true.should.be.true?
+        # end
       end
     end
   end
