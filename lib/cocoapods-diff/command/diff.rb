@@ -3,23 +3,6 @@ require 'cocoapods-diff/diffinformative'
 
 module Pod
   class Command
-    # This is an example of a cocoapods plugin adding a top-level subcommand
-    # to the 'pod' command.
-    #
-    # You can also create subcommands of existing or new commands. Say you
-    # wanted to add a subcommand to `list` to show newly deprecated pods,
-    # (e.g. `pod list deprecated`), there are a few things that would need
-    # to change.
-    #
-    # - move this file to `lib/pod/command/list/deprecated.rb` and update
-    #   the class to exist in the the Pod::Command::List namespace
-    # - change this class to extend from `List` instead of `Command`. This
-    #   tells the plugin system that it is a subcommand of `list`.
-    # - edit `lib/cocoapods_plugins.rb` to require this file
-    #
-    # @todo Create a PR to add your plugin to CocoaPods/cocoapods.org
-    #       in the `plugins.json` file, once your plugin is released.
-    #
     class Diff < Command
       require 'pathname'
 
@@ -38,7 +21,7 @@ module Pod
       def self.options
         [
           ["--#{CocoapodsDiff::REGEX_FLAG_NAME}", "Interpret the `POD_NAME` as a regular expression"],
-          # ["--#{CocoapodsDiff::INCLUDE_DEPENDENCIES_FLAG_NAME}", "Include dependencies in diff."],
+          ["--#{CocoapodsDiff::INCLUDE_DEPENDENCIES_FLAG_NAME}", "Include dependencies in diff."],
           ["--#{CocoapodsDiff::PLATFORMS_OPTION_NAME}", "Platforms to be compared. If not set, all platforms will be compared. Example: --#{CocoapodsDiff::PLATFORMS_OPTION_NAME}=ios,tvos"],
           ["--#{CocoapodsDiff::MARKDOWN_OPTION_NAME}", "Output a markdown file with diffs. Example: --#{CocoapodsDiff::MARKDOWN_OPTION_NAME}=path/to/save/markdown_name.md"],
           ["--#{CocoapodsDiff::NEWER_PODFILE_OPTION_NAME}", "Output a Podfile with the newer's versions. Example: --#{CocoapodsDiff::NEWER_PODFILE_OPTION_NAME}=path/to/save/Podfile_name"],
@@ -52,7 +35,7 @@ module Pod
         @older_version = argv.shift_argument
         @newer_version = argv.shift_argument
         @use_regex = argv.flag?(CocoapodsDiff::REGEX_FLAG_NAME)
-        # @include_dependencies = argv.flag?(CocoapodsDiff::INCLUDE_DEPENDENCIES_FLAG_NAME)
+        @include_dependencies = argv.flag?(CocoapodsDiff::INCLUDE_DEPENDENCIES_FLAG_NAME)
         @platforms = argv.option(CocoapodsDiff::PLATFORMS_OPTION_NAME, "").split(",")
         @markdown_path = argv.option(CocoapodsDiff::MARKDOWN_OPTION_NAME)
         @newer_podfile_path = argv.option(CocoapodsDiff::NEWER_PODFILE_OPTION_NAME)
@@ -71,7 +54,7 @@ module Pod
         help! "Versions should be different." if @older_version === @newer_version
 
         # Reverse versions if the newer version is smaller than the older one.
-        @older_version, @newer_version = @newer_version, @older_version if Gem::Version.new(@newer_version) < Gem::Version.new(@older_version)
+        @older_version, @newer_version = @newer_version, @older_version if Pod::Version.new(@newer_version) < Pod::Version.new(@older_version)
 
         # Validate that the Podspecs with the specified versions exist by using the `pod spec which` command.
         # Arguments needed for the command.
@@ -123,6 +106,10 @@ module Pod
           @newer_subspecs[platform.name] = newer_spec.subspecs.select { |s| s.supported_on_platform?(platform) }
         end
 
+        # Get the dependencies specs of this spec
+        get_dependencies_specs(@older_version, @older_subspecs) if @include_dependencies
+        get_dependencies_specs(@newer_version, @newer_subspecs) if @include_dependencies
+
         # If no markdown or podfile options are passed, just print the diff on console
         if @print_diff
           return UI.title "Calculating diff" do
@@ -138,16 +125,18 @@ module Pod
 
         if @newer_podfile_path
           UI.title "Generating the Podfile for #{newer_spec.name} #{newer_spec.version} at #{@newer_podfile_path}" do
-            generate_podfile(@newer_podfile_path, newer_spec.version, @newer_subspecs)
+            generate_podfile_file(@newer_podfile_path, newer_spec.version, @newer_subspecs)
           end
         end
 
         if @older_podfile_path
           UI.title "Generating the Podfile for #{older_spec.name} #{older_spec.version} at #{@older_podfile_path}" do
-            generate_podfile(@older_podfile_path, older_spec.version, @older_subspecs)
+            generate_podfile_file(@older_podfile_path, older_spec.version, @older_subspecs)
           end
         end
       end
+
+      private
 
       # Gets the podspec for an specific version
       def get_specification_for_version(version)
@@ -155,6 +144,18 @@ module Pod
         set = config.sources_manager.search_by_name(query).first
         spec_path = set.specification_paths_for_version(Pod::Version.new(version)).first
         Pod::Specification.from_file(spec_path)
+      end
+
+      # Get the dependencies specs of this spec
+      def get_dependencies_specs(version, subspecs)
+        podfile = podfile(version, subspecs)
+        specs = Pod::Installer::Analyzer.new(config.sandbox, podfile).analyze.specs_by_target
+
+        @platforms.each do |platform|
+          key = specs.keys.find { |key| key.name.end_with?(platform.name.to_s) }
+          next if key.nil?
+          subspecs[platform.name] = specs[key]
+        end
       end
 
       # Generates the diff table between versions to be printed
@@ -165,8 +166,8 @@ module Pod
 
         @platforms.each do |platform|
           # Get a hash with the needed data: { name: => minimum supported version }
-          older_subspecs_data = @older_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) }
-          newer_subspecs_data = @newer_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) }
+          older_subspecs_data = @older_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) || "Not defined" }
+          newer_subspecs_data = @newer_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) || "Not defined" }
           
           all_names = (newer_subspecs_data.keys | older_subspecs_data.keys)
           name_header = "Name"
@@ -179,10 +180,11 @@ module Pod
           version_cell_length = [version_cell_length, version_header.length].max
           
           # Build the table
-          diff += "\n## #{platform.name} #{@older_version} vs. #{@newer_version}\n\n"
-          diff += "| #{name_header.ljust(name_cell_length)} | #{version_header.ljust(version_cell_length)} | #{name_header.ljust(name_cell_length)} | #{version_header.ljust(version_cell_length)} |\n"
-          diff += "|-#{"".ljust(name_cell_length, "-")}:|:#{"".ljust(version_cell_length, "-")}-|-#{"".ljust(name_cell_length, "-")}:|:#{"".ljust(version_cell_length, "-")}-|\n"
+          diff += "\n## #{platform.name} #{@older_version} vs. #{@newer_version}\n\n" # Table title
+          diff += "| #{name_header.ljust(name_cell_length)} | #{version_header.ljust(version_cell_length)} | #{name_header.ljust(name_cell_length)} | #{version_header.ljust(version_cell_length)} |\n" # Headers
+          diff += "|-#{"".ljust(name_cell_length, "-")}:|:#{"".ljust(version_cell_length, "-")}-|-#{"".ljust(name_cell_length, "-")}:|:#{"".ljust(version_cell_length, "-")}-|\n" # Columns aligment
           
+          # Table body
           all_names.each do |name|
             older_name = older_subspecs_data.keys.include?(name) ? name.to_s : ""
             older_version = older_subspecs_data[name] || ""
@@ -203,14 +205,13 @@ module Pod
         markdown_pathname.write(generate_diff_table)
       end
 
-      def generate_podfile(path, version, subspecs)
-        # Generate the Podfile
+      def generate_podfile_file(path, version, subspecs)
         podfile = "install! 'cocoapods', integrate_targets: false\n"
         podfile += "use_frameworks!\n"
 
         @platforms.each do |platform|
           next if subspecs[platform.name].empty?
-          platform_version = subspecs[platform.name].map { |subspec| subspec.deployment_target(platform.name) }.max
+          platform_version = subspecs[platform.name].map { |subspec| Pod::Version.new(subspec.deployment_target(platform.name) || "0") }.max
 
           podfile += "\ntarget '#{@pod_name}_#{platform.name}' do\n"
           podfile += "\tplatform :#{platform.name}, '#{platform_version}'\n"
@@ -225,99 +226,27 @@ module Pod
         podfile_pathname.write(podfile)
       end
 
-      # install! 'cocoapods', :integrate_targets => false
-      # use_frameworks!
+      def podfile(version, subspecs)
+        ps = @platforms
+        pod_name = @pod_name
+        
+        Pod::Podfile.new do
+          install! 'cocoapods', integrate_targets: false
+          use_frameworks!
 
-      # target 'XamarinGoogle' do
-      #   platform :ios, '12.0'
-      #   pod 'FBSDKCoreKit', '15.0.0'
-      # end
+          ps.each do |p|
+            next if subspecs[p.name].empty?
+            platform_version = subspecs[p.name].map { |subspec| subspec.deployment_target(p.name) }.max
+            
+            target "#{pod_name}_#{p.name}" do
+              platform p.name, platform_version
+              pod pod_name, version
+              subspecs[p.name].each { |subspec| pod subspec.name, subspec.version }
+            end
+          end
+        end
+      end
 
-      ######################################################
-      ######################################################
-
-      # def podfile-original
-      #   Podfile.new do
-      #     install! 'cocoapods', integrate_targets: false, warn_for_multiple_pod_sources: false
-      #     source_urls.each { |u| source(u) }
-      #     platform platform_name, platform_version
-      #     pod podspec.name, podspec: podspec.defined_in_file
-      #     target 'Dependencies'
-      #   end
-
-      #   @podfile ||= begin
-      #     if podspec = @podspec
-      #       platform = podspec.available_platforms.first
-      #       platform_name = platform.name
-      #       platform_version = platform.deployment_target.to_s
-      #       source_urls = Config.instance.sources_manager.all.map(&:url).compact
-      #       Podfile.new do
-      #         install! 'cocoapods', integrate_targets: false, warn_for_multiple_pod_sources: false
-      #         source_urls.each { |u| source(u) }
-      #         platform platform_name, platform_version
-      #         pod podspec.name, podspec: podspec.defined_in_file
-      #         target 'Dependencies'
-      #       end
-      #     else
-      #       verify_podfile_exists!
-      #       config.podfile
-      #     end
-      #   end
-      # end
-
-      # def validate-original!
-      #   super
-      #   if @podspec_name
-      #     require 'pathname'
-      #     path = Pathname.new(@podspec_name)
-      #     if path.file?
-      #       @podspec = Specification.from_file(path)
-      #     else
-      #       sets = Config.
-      #         instance.
-      #         sources_manager.
-      #         search(Dependency.new(@podspec_name))
-      #       spec = sets && sets.specification
-      #       @podspec = spec && spec.subspec_by_name(@podspec_name)
-      #       raise Informative, "Cannot find `#{@podspec_name}`." unless @podspec
-      #     end
-      #   end
-      #   if (@produce_image_output || @produce_graphviz_output) && Executable.which('dot').nil?
-      #     raise Informative, 'GraphViz must be installed and `dot` must be in ' \
-      #       '$PATH to produce image or graphviz output.'
-      #   end
-      # end
-
-      # def dependencies-original
-      #   @dependencies ||= begin
-      #     lockfile = config.lockfile unless @ignore_lockfile || @podspec
-
-      #     if !lockfile || @repo_update
-      #       analyzer = Installer::Analyzer.new(
-      #         sandbox,
-      #         podfile,
-      #         lockfile
-      #       )
-
-      #       specs = config.with_changes(skip_repo_update: !@repo_update) do
-      #         analyzer.analyze(@repo_update || @podspec).specs_by_target.values.flatten(1)
-      #       end
-
-      #       lockfile = Lockfile.generate(podfile, specs, {})
-      #     end
-
-      #     lockfile.to_hash['PODS']
-      #   end
-      # end
-
-      # def sandbox
-      #   if @podspec
-      #     require 'tmpdir'
-      #     Sandbox.new(Dir.mktmpdir)
-      #   else
-      #     config.sandbox
-      #   end
-      # end
     end
   end
 end
