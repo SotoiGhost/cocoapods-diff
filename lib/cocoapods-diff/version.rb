@@ -1,6 +1,11 @@
 module CocoapodsDiff
   NAME = "cocoapods-diff"
   VERSION = "0.7.0"
+  SUMMARY = "Shows the diff between two versions of a pod."
+  DESCRIPTION = <<-DESC
+    A Cocoapods plugin that shows the diff between two versions of a pod. 
+    It can generate a markdown showing the diff or create the Podfile for the specified versions.   
+  DESC
 
   # CLAide Arguments
   POD_NAME_ARGUMENT_NAME = "POD_NAME"

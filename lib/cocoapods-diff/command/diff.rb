@@ -6,11 +6,8 @@ module Pod
     class Diff < Command
       require 'pathname'
 
-      self.summary = 'Short description of cocoapods-diff.'
-
-      self.description = <<-DESC
-        Longer description of cocoapods-diff.
-      DESC
+      self.summary = CocoapodsDiff::SUMMARY
+      self.description = CocoapodsDiff::DESCRIPTION
 
       self.arguments = [
         CLAide::Argument.new(CocoapodsDiff::POD_NAME_ARGUMENT_NAME, true, false),

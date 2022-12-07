@@ -8,9 +8,9 @@ Gem::Specification.new do |spec|
   spec.version       = CocoapodsDiff::VERSION
   spec.authors       = ['Israel Soto']
   spec.email         = ['israel.spgh@gmail.com']
-  spec.description   = %q{A longer description of cocoapods-diff.}
-  spec.summary       = %q{A short description of cocoapods-diff.}
-  spec.homepage      = 'https://github.com/EXAMPLE/cocoapods-diff'
+  spec.description   = CocoapodsDiff::SUMMARY
+  spec.summary       = CocoapodsDiff::DESCRIPTION
+  spec.homepage      = 'https://github.com/SotoiGhost/cocoapods-diff'
   spec.license       = 'MIT'
 
   spec.files         = `git ls-files`.split($/)
