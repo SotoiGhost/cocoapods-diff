@@ -4,7 +4,7 @@ module CocoapodsDiff
   SUMMARY = "Shows the diff between two versions of a pod."
   DESCRIPTION = <<-DESC
     A Cocoapods plugin that shows the diff between two versions of a pod. 
-    It can generate a markdown showing the diff or create the Podfile for the specified versions.   
+    It can generate a markdown showing the diff or create the Podfile for the specified versions including all the subspecs and its dependencies.   
   DESC
 
   # CLAide Arguments
