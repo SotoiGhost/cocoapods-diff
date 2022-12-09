@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    cocoapods-diff (0.7.0)
+    cocoapods-diff (0.8.0)
 
 GEM
   remote: https://rubygems.org/

@@ -82,31 +82,19 @@ module Pod
         older_spec = get_specification_for_version(@older_version)
         newer_spec = get_specification_for_version(@newer_version)
 
-        # Warn the user if there's no subspecs to compare.
-        if older_spec.subspecs.empty? && newer_spec.subspecs.empty?
+        # Warn the user if there's no subspecs or dependencies to compare.
+        if older_spec.subspecs.empty? && older_spec.dependencies.empty? && newer_spec.subspecs.empty? && newer_spec.dependencies.empty?
           return UI.warn "There's nothing to compare for #{@pod_name} #{@older_version} vs. #{@newer_version}"
         end
         
-        # Remove the default subspecs value to compare all the subspecs if any
-        older_spec.default_subspecs = []
-        newer_spec.default_subspecs = []
-
         # Get all the supported platforms without the OS version if no platforms are specified
         @platforms = (newer_spec.available_platforms.map(&:name) | older_spec.available_platforms.map(&:name)) if @platforms.empty?
         @platforms.map! { |platform| Pod::Platform.new(platform) }
 
-        # Split the subspecs per platform now as we can use them multiple times
-        @older_subspecs = {}
-        @newer_subspecs = {}
-        @platforms.each do |platform|
-          @older_subspecs[platform.name] = older_spec.subspecs.select { |s| s.supported_on_platform?(platform) }
-          @newer_subspecs[platform.name] = newer_spec.subspecs.select { |s| s.supported_on_platform?(platform) }
-        end
-
-        # Get the dependencies specs of this spec
-        get_dependencies_specs(@older_version, @older_subspecs) if @include_dependencies
-        get_dependencies_specs(@newer_version, @newer_subspecs) if @include_dependencies
-
+        # Let cocoapods resolve the dependencies for a spec
+        @older_specs = resolve_dependencies_for_spec(older_spec)
+        @newer_specs = resolve_dependencies_for_spec(newer_spec)
+        
         # If no markdown or podfile options are passed, just print the diff on console
         if @print_diff
           return UI.title "Calculating diff" do
@@ -122,13 +110,13 @@ module Pod
 
         if @newer_podfile_path
           UI.title "Generating the Podfile for #{newer_spec.name} #{newer_spec.version} at #{@newer_podfile_path}" do
-            generate_podfile_file(@newer_podfile_path, newer_spec.version, @newer_subspecs)
+            generate_podfile_file(newer_spec, @newer_specs, @newer_podfile_path)
           end
         end
 
         if @older_podfile_path
           UI.title "Generating the Podfile for #{older_spec.name} #{older_spec.version} at #{@older_podfile_path}" do
-            generate_podfile_file(@older_podfile_path, older_spec.version, @older_subspecs)
+            generate_podfile_file(older_spec, @older_specs, @older_podfile_path)
           end
         end
       end
@@ -140,18 +128,63 @@ module Pod
         query = @use_regex ? @pod_name : Regexp.escape(@pod_name)
         set = config.sources_manager.search_by_name(query).first
         spec_path = set.specification_paths_for_version(Pod::Version.new(version)).first
-        Pod::Specification.from_file(spec_path)
+        spec = Pod::Specification.from_file(spec_path)
+        
+        # Remove the default subspecs value to compare all the subspecs if any
+        spec.default_subspecs = []
+        spec
       end
 
-      # Get the dependencies specs of this spec
-      def get_dependencies_specs(version, subspecs)
-        podfile = podfile(version, subspecs)
-        specs = Pod::Installer::Analyzer.new(config.sandbox, podfile).analyze.specs_by_target
+      # Resolve all the dependencies specs needed for this spec
+      def resolve_dependencies_for_spec(spec)
+        # Get all the subspecs of the spec
+        specs_by_platform = {}
+        @platforms.each do |platform|
+          specs_by_platform[platform.name] = spec.recursive_subspecs.select { |s| s.supported_on_platform?(platform) }
+        end
+
+        podfile = podfile(spec, specs_by_platform)
+        resolved_specs = Pod::Installer::Analyzer.new(config.sandbox, podfile).analyze.specs_by_target
 
         @platforms.each do |platform|
-          key = specs.keys.find { |key| key.name.end_with?(platform.name.to_s) }
+          key = resolved_specs.keys.find { |key| key.name.end_with?(platform.name.to_s) }
           next if key.nil?
-          subspecs[platform.name] = specs[key]
+
+          if @include_dependencies
+            specs_by_platform[platform.name] = resolved_specs[key]
+          else
+            pod_names = [spec.name]
+            pod_names += spec.dependencies(platform).map(&:name)
+            pod_names += specs_by_platform[platform.name].map(&:name)
+            pod_names += specs_by_platform[platform.name].map { |spec| spec.dependencies(platform).map(&:name) }.flatten
+            pod_names = pod_names.uniq
+
+            specs_by_platform[platform.name] = resolved_specs[key].select { |spec| pod_names.include?(spec.name) }
+          end
+        end
+
+        specs_by_platform
+      end
+
+      def podfile(spec, specs_by_platform)
+        ps = @platforms
+        pod_name = spec.name
+        pod_version = spec.version.to_s
+        
+        Pod::Podfile.new do
+          install! 'cocoapods', integrate_targets: false
+          use_frameworks!
+
+          ps.each do |p|
+            next if not spec.supported_on_platform?(p)
+            platform_version = ([spec.deployment_target(p.name)] + specs_by_platform[p.name].map { |spec| spec.deployment_target(p.name) }).max
+            
+            target "#{pod_name}_#{p.name}" do
+              platform p.name, platform_version
+              pod pod_name, pod_version
+              specs_by_platform[p.name].each { |spec| pod spec.name, spec.version } if not specs_by_platform[p.name].empty?
+            end
+          end
         end
       end
 
@@ -163,17 +196,17 @@ module Pod
 
         @platforms.each do |platform|
           # Get a hash with the needed data: { name: => minimum supported version }
-          older_subspecs_data = @older_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) || "Not defined" }
-          newer_subspecs_data = @newer_subspecs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) || "Not defined" }
+          older_specs_data = @older_specs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) || "Not defined" }
+          newer_specs_data = @newer_specs[platform.name].each_with_object({}) { |subspec, hash| hash[subspec.name.to_sym] = subspec.deployment_target(platform.name) || "Not defined" }
           
-          all_names = (newer_subspecs_data.keys | older_subspecs_data.keys)
+          all_names = (newer_specs_data.keys | older_specs_data.keys)
           name_header = "Name"
           version_header = "Minimum Supported Version"
           
           # Calculate the cell length to print a pretty table
           name_cell_length = all_names.max_by(&:length).length
           name_cell_length = [name_cell_length, name_header.length].max
-          version_cell_length = (newer_subspecs_data.values | older_subspecs_data.values).max_by(&:length).length
+          version_cell_length = (newer_specs_data.values | older_specs_data.values).max_by(&:length).length
           version_cell_length = [version_cell_length, version_header.length].max
           
           # Build the table
@@ -183,10 +216,10 @@ module Pod
           
           # Table body
           all_names.each do |name|
-            older_name = older_subspecs_data.keys.include?(name) ? name.to_s : ""
-            older_version = older_subspecs_data[name] || ""
-            newer_name = newer_subspecs_data.keys.include?(name) ? name.to_s : ""
-            newer_version = newer_subspecs_data[name] || ""
+            older_name = older_specs_data.keys.include?(name) ? name.to_s : ""
+            older_version = older_specs_data[name] || ""
+            newer_name = newer_specs_data.keys.include?(name) ? name.to_s : ""
+            newer_version = newer_specs_data[name] || ""
 
             diff += "| #{older_name.ljust(name_cell_length)} | #{older_version.ljust(version_cell_length)} | #{newer_name.ljust(name_cell_length)} | #{newer_version.ljust(version_cell_length)} |\n"
           end
@@ -202,19 +235,16 @@ module Pod
         markdown_pathname.write(generate_diff_table)
       end
 
-      def generate_podfile_file(path, version, subspecs)
+      def generate_podfile_file(spec, specs_by_platform, path)
         podfile = "install! 'cocoapods', integrate_targets: false\n"
         podfile += "use_frameworks!\n"
 
         @platforms.each do |platform|
-          next if subspecs[platform.name].empty?
-          platform_version = subspecs[platform.name].map { |subspec| Pod::Version.new(subspec.deployment_target(platform.name) || "0") }.max
+          platform_version = ([spec.deployment_target(platform.name)] + specs_by_platform[platform.name].map { |spec| spec.deployment_target(platform.name) }).max
 
           podfile += "\ntarget '#{@pod_name}_#{platform.name}' do\n"
           podfile += "\tplatform :#{platform.name}, '#{platform_version}'\n"
-          podfile += "\tpod '#{@pod_name}', '#{version}'\n"
-
-          subspecs[platform.name].each { |subspec| podfile += "\tpod '#{subspec.name}', '#{subspec.version}'\n" }
+          specs_by_platform[platform.name].each { |spec| podfile += "\tpod '#{spec.name}', '#{spec.version}'\n" } if not specs_by_platform[platform.name].empty?
           podfile += "end\n"
         end
         
@@ -222,28 +252,6 @@ module Pod
         podfile_pathname.dirname.mkpath
         podfile_pathname.write(podfile)
       end
-
-      def podfile(version, subspecs)
-        ps = @platforms
-        pod_name = @pod_name
-        
-        Pod::Podfile.new do
-          install! 'cocoapods', integrate_targets: false
-          use_frameworks!
-
-          ps.each do |p|
-            next if subspecs[p.name].empty?
-            platform_version = subspecs[p.name].map { |subspec| subspec.deployment_target(p.name) }.max
-            
-            target "#{pod_name}_#{p.name}" do
-              platform p.name, platform_version
-              pod pod_name, version
-              subspecs[p.name].each { |subspec| pod subspec.name, subspec.version }
-            end
-          end
-        end
-      end
-
     end
   end
 end
