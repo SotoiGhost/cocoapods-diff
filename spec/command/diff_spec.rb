@@ -2,9 +2,9 @@ require File.expand_path("../../spec_helper", __FILE__)
 require 'cocoapods-diff/version.rb'
 
 module Pod
-  POD_NAME = "FBSDKCoreKit"
+  POD_NAME = "Firebase"
   OLDER_VERSION = "6.0.0"
-  NEWER_VERSION = "15.0.0"
+  NEWER_VERSION = "10.0.0"
   
   describe Command::Diff do
     describe "CLAide" do

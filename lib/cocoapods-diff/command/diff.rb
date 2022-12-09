@@ -177,7 +177,10 @@ module Pod
 
           ps.each do |p|
             next if not spec.supported_on_platform?(p)
-            platform_version = ([spec.deployment_target(p.name)] + specs_by_platform[p.name].map { |spec| spec.deployment_target(p.name) }).max
+            
+            platform_version = [Pod::Version.new(spec.deployment_target(p.name) || "0")]
+            platform_version += specs_by_platform[p.name].map { |spec| Pod::Version.new(spec.deployment_target(p.name) || "0") }
+            platform_version = platform_version.max
             
             target "#{pod_name}_#{p.name}" do
               platform p.name, platform_version
@@ -240,7 +243,11 @@ module Pod
         podfile += "use_frameworks!\n"
 
         @platforms.each do |platform|
-          platform_version = ([spec.deployment_target(platform.name)] + specs_by_platform[platform.name].map { |spec| spec.deployment_target(platform.name) }).max
+          next if not spec.supported_on_platform?(platform)
+
+          platform_version = [Pod::Version.new(spec.deployment_target(platform.name) || "0")]
+          platform_version += specs_by_platform[platform.name].map { |spec| Pod::Version.new(spec.deployment_target(platform.name) || "0") }
+          platform_version = platform_version.max
 
           podfile += "\ntarget '#{@pod_name}_#{platform.name}' do\n"
           podfile += "\tplatform :#{platform.name}, '#{platform_version}'\n"
